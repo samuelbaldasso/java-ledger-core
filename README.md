@@ -24,7 +24,7 @@ Designed and developed by **Samuel Baldasso**.
 - Record a debit and a credit for every transfer.
 - Retrieve an account statement from ledger entries.
 - Protect balance updates with pessimistic database locks acquired in a deterministic order.
-- Store a unique idempotency key for each transfer.
+- Store a unique idempotency key and the original successful transfer response.
 - Validate requests and return structured errors using Spring `ProblemDetail`.
 - Apply versioned database migrations with Flyway.
 - Explore the API through Swagger UI.
@@ -86,13 +86,15 @@ The domain model has no Spring or JPA dependencies. Application services orchest
 
 ### Transfer flow
 
-1. Check whether the idempotency key already exists.
-2. Order the two account UUIDs and acquire pessimistic write locks in that order.
-3. Debit the source account and credit the target account through domain methods.
-4. Create a balanced transaction containing one debit entry and one credit entry.
-5. Save both balances and the ledger transaction inside the same database transaction.
+1. Look up the stored transfer receipt and compare all request fields. Equal requests replay the original response; different requests return HTTP 409.
+2. Reject historical keys whose original response was never stored.
+3. Order the two account UUIDs and acquire pessimistic write locks in that order.
+4. Check the receipt again after acquiring locks, in case a concurrent winner committed while this request waited.
+5. Debit the source, credit the target, and create balanced ledger entries.
+6. Insert the receipt with the original request and resulting balances, committing all changes together.
+7. On a persistence collision, roll back the entire attempt, then read the winner in a new transaction. Return its response for equal requests or HTTP 409 for different requests.
 
-Deterministic lock ordering reduces deadlock risk for transfers involving the same accounts in opposite directions. The unique idempotency index prevents two committed transactions from sharing a key, but concurrent collision recovery is not implemented yet; see [current limitations](#current-limitations).
+Deterministic account lock ordering reduces deadlock risk. Unique keys prevent duplicate committed transfers. The failed attempt must finish rolling back before recovery begins. Each transfer owns an independent transaction; it does not join a caller's existing transaction. See ADRs 0010-0012 for the contract and trade-offs.
 
 ## Domain and persistence
 
@@ -112,6 +114,7 @@ Accounts cannot be debited beyond their available balance. Transfers require dis
 - **`accounts`**: UUID identity, unique account number, owner name, balance, currency, status, and creation timestamp.
 - **`transactions`**: UUID identity, description, creation timestamp, and unique idempotency key.
 - **`entries`**: UUID identity, transaction reference, account reference, debit/credit type, amount, and currency.
+- **`transfer_receipts`**: unique key, original request, transaction reference, resulting balances, and execution timestamp for replay.
 
 Amounts use `NUMERIC(19, 4)`. Database constraints reject negative account balances, non-positive entry amounts, and invalid entry types. Foreign keys use `ON DELETE RESTRICT`, and entry lookups have indexes on transaction and account IDs. Balance between debits and credits is validated in the domain; it is not enforced by a database constraint.
 
@@ -119,6 +122,7 @@ Amounts use `NUMERIC(19, 4)`. Database constraints reject negative account balan
 | --- | --- |
 | [V1](src/main/resources/db/migration/V1__create_accounts_and_ledger_tables.sql) | Create account, transaction, and entry tables with constraints and indexes |
 | [V2](src/main/resources/db/migration/V2__add_idempotency_key_to_transactions.sql) | Add the required idempotency key and its unique index |
+| [V3](src/main/resources/db/migration/V3__create_transfer_receipts.sql) | Store successful requests and their original transfer responses |
 
 Hibernate uses `ddl-auto: validate`, while Flyway manages schema changes. Open Session in View is disabled.
 
@@ -241,7 +245,9 @@ The response includes `transactionId`, source and target IDs, `transferredAmount
 
 There is currently no deposit endpoint or funding seed. Accounts created through the API alone cannot make a positive transfer until a funded fixture is provided. Unit tests create funded domain accounts to exercise transfers. Directly changing a database balance does not create the corresponding ledger entries.
 
-Use one key per transfer intent. The current implementation accepts a non-blank string rather than requiring a UUID. Reusing a key with different request data is not safely handled yet.
+Use one key per transfer intent (a non-blank string of at most 128 characters; UUID format is not required). Repeating the same request returns the original response, including the balances at that time. Changing source, target, amount, currency, or description with the same key returns HTTP 409. Numeric values such as 100.0 and 100.00 are equivalent; descriptions are compared exactly. The API rejects amounts that would require currency rounding. Description length is limited to 255 characters.
+
+Only successful results are stored. Historical keys from before V3 have no reliable response snapshot and return HTTP 409 with type `idempotency-result-unavailable`; do not resubmit the payment with another key without investigating the original operation.
 
 ### Error responses
 
@@ -251,9 +257,9 @@ Application errors use `ProblemDetail`, with fields such as `type`, `title`, `st
 | --- | --- |
 | `400 Bad Request` | Request validation failure, missing idempotency header, currency mismatch, or invalid argument |
 | `404 Not Found` | Account does not exist |
-| `409 Conflict` | Account number already exists when checked by the application |
+| `409 Conflict` | Account number conflict, changed data for an existing transfer key, or historical response unavailable |
 | `422 Unprocessable Entity` | Insufficient funds or inactive account |
-| `500 Internal Server Error` | Unexpected errors, including currently unhandled database conflicts |
+| `500 Internal Server Error` | Unexpected errors, including database conflicts without a committed transfer receipt |
 
 ## Testing
 
@@ -273,7 +279,8 @@ Tests include:
 
 - Domain rules for money, accounts, and balanced transactions.
 - Account-opening and transfer services with mocked repositories.
-- Transfer lock acquisition order and repeated-key behavior.
+- Transfer lock acquisition order, original-response replay, and conflicts for changed request fields.
+- PostgreSQL tests for concurrent retries, collision rollback, and atomic rollback after receipt persistence.
 - MVC request validation, response mapping, and error handling.
 - Domain/JPA mapper round trips.
 - Application context startup with PostgreSQL 16 through Testcontainers and Spring Boot `@ServiceConnection`.
@@ -284,7 +291,15 @@ The context test needs Docker. Tests that do not require the PostgreSQL containe
 ./mvnw '-Dtest=*Test' test
 ```
 
-The singular `*Test` pattern excludes `LedgerCoreApplicationTests`. The existing context test does not verify concurrent transfers, database rollback behavior, or idempotency collisions.
+The singular `*Test` pattern excludes `LedgerCoreApplicationTests` and `TransferIdempotencyIntegrationTests`, which require Docker. The integration suite coordinates concurrent requests with barriers and verifies balances, entry counts, balanced debit/credit totals, and stored receipts.
+
+If the older Docker client bundled with this project's Testcontainers cannot connect to Docker 29, the following API override was verified in the development environment:
+
+```powershell
+.\mvnw.cmd '-Dapi.version=1.44' test
+```
+
+This flag changes the test client's API version; it does not change Docker's configuration.
 
 Build a JAR, including the full test suite:
 
@@ -309,19 +324,22 @@ The ADRs document the reasoning and trade-offs behind the design. Existing recor
 | [0007](docs/adr/0007-rest-api-design-and-rfc-7807-error-handling.md) | Define REST contracts and structured `ProblemDetail` errors |
 | [0008](docs/adr/0008-account-management-and-statement-api.md) | Expose account creation, account queries, and statements |
 | [0009](docs/adr/0009-openapi-documentation-and-containerization.md) | Provide OpenAPI documentation and Docker execution |
+| [0010](docs/adr/0010-original-transfer-response-and-conflict.md) | Replay the original response and reject changed requests |
+| [0011](docs/adr/0011-separate-transfer-receipt-storage.md) | Store transfer receipts separately from accounting records |
+| [0012](docs/adr/0012-idempotency-collision-recovery-after-rollback.md) | Recover concurrent collisions after complete rollback |
 
-See also the [architecture documentation index](docs/README.md). Some ADR statements describe intended guarantees beyond the current implementation, particularly concurrent idempotency recovery and append-only enforcement.
+See also the [architecture documentation index](docs/README.md). ADR 0006 is partially superseded by 0010-0012. Append-only enforcement remains a limitation.
 
 ## Current limitations
 
 This is an educational implementation with the following areas still open:
 
-- **Idempotency semantics:** existing keys are not checked against the original payload. Replays combine the stored transaction ID and timestamp with the new request's accounts and amount, and current account balances. They do not reproduce a stored original response.
-- **Concurrent conflicts:** the unique key prevents duplicate committed transaction records, but there is no recovery path to return the winning transaction after a collision. Concurrent account-number creation can also produce an unhandled database error.
-- **Integration coverage:** database concurrency, rollback, and balance-to-ledger reconciliation need dedicated tests.
+- **Receipt lifecycle:** only successful responses are retained, without expiration. Historical transfers without a receipt cannot reproduce an original response. Key retention and access scoping need explicit decisions before adding cleanup or multi-tenant access.
+- **Concurrent conflicts:** transfer key collisions are recovered after rollback. General deadlocks, timeouts, and concurrent account-number creation do not yet have dedicated recovery policies.
+- **Integration coverage:** transfer idempotency concurrency and rollback are tested on PostgreSQL. Full reconciliation from ledger-backed initial funding and load testing remain open; integration fixtures currently fund accounts directly.
 - **Funding:** no deposit API or ledger-balanced initial funding workflow is implemented.
 - **Ledger immutability:** foreign keys restrict deletion of referenced parents; they do not make ledger records append-only. Updates and entry deletion are not comprehensively prohibited by database permissions or triggers.
 - **Statements:** no pagination, date filters, or explicit fetch optimization for entry loading; the lazy collection mapping can cause N+1 queries.
-- **Input bounds:** string lengths and numeric limits are not fully validated against database column limits. Monetary inputs are rounded to the currency scale.
+- **Input bounds:** transfer key and description lengths are validated and the transfer API rejects currency rounding. Other string lengths and numeric limits are not fully validated against database column limits.
 - **Migration of existing data:** V2 adds a required column without a backfill, so upgrading a database containing transactions needs an additional migration strategy.
 - **Operations and access control:** authentication, authorization, application health endpoints, metrics, tracing, explicit error logging, and a CI pipeline are not implemented.
