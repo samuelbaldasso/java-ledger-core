@@ -1,6 +1,7 @@
 package com.sbaldasso.ledgercore.domain.model;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
@@ -71,7 +72,8 @@ public class Transaction {
                 Entry.credit(targetAccountId, amount)
         );
 
-        return new Transaction(UUID.randomUUID(), idempotencyKey, description, entries, Instant.now());
+        // Match PostgreSQL precision so the first response and persisted replay have the same timestamp.
+        return new Transaction(UUID.randomUUID(), idempotencyKey, description, entries, Instant.now().truncatedTo(ChronoUnit.MICROS));
     }
 
     public static Transaction createTransfer(UUID sourceAccountId, UUID targetAccountId, Money amount, String description) {

@@ -11,7 +11,10 @@ Este diretório contém os registros de decisões arquiteturais (**Architecture 
 | [ADR-0003](adr/0003-double-entry-ledger-transaction-modeling.md) | Modelagem de Livro-Razão Contábil por Partidas Dobradas (`Transaction` e `Entry`) | Aceito | 2026-09-28 |
 | [ADR-0004](adr/0004-persistence-architecture-postgresql-and-pessimistic-locking.md) | Arquitetura de Persistência com PostgreSQL, Flyway e Pessimistic Locking | Aceito | 2026-09-28 |
 | [ADR-0005](adr/0005-deadlock-prevention-via-deterministic-lock-ordering.md) | Prevenção de Deadlock por Ordenação Determinística de Locks em Transferências | Aceito | 2026-09-28 |
-| [ADR-0006](adr/0006-transaction-idempotency-via-unique-key.md) | Garantia de Idempotência em Transações Financeiras via Chave Única | Aceito | 2026-09-28 |
+| [ADR-0006](adr/0006-transaction-idempotency-via-unique-key.md) | Garantia de Idempotência em Transações Financeiras via Chave Única | Parcialmente substituído por 0010–0012 | 2026-09-28 |
 | [ADR-0007](adr/0007-rest-api-design-and-rfc-7807-error-handling.md) | Design de API REST, Cabeçalho de Idempotência e Tratamento de Erros via RFC 7807 (`ProblemDetail`) | Aceito | 2026-09-28 |
 | [ADR-0008](adr/0008-account-management-and-statement-api.md) | Gestão de Contas, Extrato Bancário e Semântica de Conflito (`409 Conflict`) | Aceito | 2026-09-28 |
 | [ADR-0009](adr/0009-openapi-documentation-and-containerization.md) | Documentação Interativa com OpenAPI/Swagger e Containerização com Docker | Aceito | 2026-09-28 |
+| [ADR-0010](adr/0010-original-transfer-response-and-conflict.md) | Resposta original e conflito por mudança na requisição | Aceito | 2026-10-11 |
+| [ADR-0011](adr/0011-separate-transfer-receipt-storage.md) | Comprovante de idempotência separado do ledger | Aceito | 2026-10-11 |
+| [ADR-0012](adr/0012-idempotency-collision-recovery-after-rollback.md) | Recuperação de colisões depois do rollback | Aceito | 2026-10-11 |

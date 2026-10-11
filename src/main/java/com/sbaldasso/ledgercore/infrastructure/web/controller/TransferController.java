@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Currency;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/api/v1/transfers")
@@ -48,6 +49,8 @@ public class TransferController {
                     content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
             @ApiResponse(responseCode = "404", description = "Conta de origem ou destino não encontrada",
                     content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
+            @ApiResponse(responseCode = "409", description = "Chave reutilizada com dados diferentes ou resposta histórica indisponível",
+                    content = @Content(schema = @Schema(implementation = ProblemDetail.class))),
             @ApiResponse(responseCode = "422", description = "Saldo insuficiente ou conta inativa",
                     content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
     })
@@ -56,8 +59,11 @@ public class TransferController {
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody TransferRequest request
     ) {
-        Currency currency = Currency.getInstance(request.currency().toUpperCase());
+        Currency currency = Currency.getInstance(request.currency().toUpperCase(Locale.ROOT));
         Money amount = Money.of(request.amount(), currency);
+        if (request.amount().compareTo(amount.amount()) != 0) {
+            throw new IllegalArgumentException("Amount has unsupported fractional digits for the currency");
+        }
 
         TransferMoneyCommand command = new TransferMoneyCommand(
                 request.sourceAccountId(),

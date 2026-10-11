@@ -1,5 +1,7 @@
 package com.sbaldasso.ledgercore.infrastructure.web.exception;
 
+import com.sbaldasso.ledgercore.application.idempotency.IdempotencyConflictException;
+import com.sbaldasso.ledgercore.application.idempotency.IdempotencyResultUnavailableException;
 import com.sbaldasso.ledgercore.domain.model.AccountNotActiveException;
 import com.sbaldasso.ledgercore.domain.model.AccountNotFoundException;
 import com.sbaldasso.ledgercore.domain.model.AccountNumberAlreadyExistsException;
@@ -19,6 +21,24 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ProblemDetail handleIdempotencyConflict(IdempotencyConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Idempotency Key Conflict");
+        problem.setType(URI.create("https://api.ledger-core.com/errors/idempotency-key-conflict"));
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
+
+    @ExceptionHandler(IdempotencyResultUnavailableException.class)
+    public ProblemDetail handleHistoricalIdempotencyResult(IdempotencyResultUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Idempotency Result Unavailable");
+        problem.setType(URI.create("https://api.ledger-core.com/errors/idempotency-result-unavailable"));
+        problem.setProperty("timestamp", Instant.now());
+        return problem;
+    }
 
     @ExceptionHandler(AccountNotFoundException.class)
     public ProblemDetail handleAccountNotFound(AccountNotFoundException ex) {

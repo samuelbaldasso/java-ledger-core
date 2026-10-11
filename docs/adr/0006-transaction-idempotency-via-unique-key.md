@@ -1,8 +1,13 @@
 # ADR 0006: Garantia de Idempotência em Transações Financeiras via Chave Única
 
-- **Status:** Aceito
+- **Status:** Parcialmente substituído pelos ADRs 0010, 0011 e 0012
 - **Data:** 2026-09-28
 - **Decisores:** Samuel Baldasso
+
+> Atualização em 2026-10-11: a chave única permanece. O contrato de resposta, o armazenamento
+> separado e a recuperação após rollback estão detalhados nos [ADRs 0010](0010-original-transfer-response-and-conflict.md),
+> [0011](0011-separate-transfer-receipt-storage.md) e [0012](0012-idempotency-collision-recovery-after-rollback.md).
+> O texto original descrevia uma recuperação de colisões que ainda não estava implementada.
 
 ---
 
@@ -33,15 +38,15 @@ Decidimos implementar o padrão **Idempotency Key (Chave de Idempotência)** na 
 - **Verificação Prévia:** Antes de adquirir locks pessimistas nas contas, o serviço consulta se a `idempotencyKey` já foi processada.
   - Se **SIM**: O serviço retorna imediatamente o resultado da transação previamente executada (Status 200 OK sem efeito colateral duplicado).
   - Se **NÃO**: Prossegue com o lock ordering e execução da transferência.
-- **Tratamento de Colisão Concorrente:** Em caso de duas requisições com a mesma chave chegando no mesmo milissegundo, a segunda requisição é interceptada pela constraint única do banco, recuperando e retornando a transação vencedora com segurança.
+- **Tratamento de Colisão Concorrente:** a restrição única impede duas transações confirmadas com a mesma chave. A recuperação da resposta vencedora exige encerrar o rollback antes de fazer uma nova consulta; esse fluxo foi implementado conforme o ADR 0012.
 
 ---
 
 ## 3. Consequências
 
 ### Positivas:
-- **Segurança de Rede e Retentativas:** Clientes e gateways podem retransmitir requisições com segurança total sem risco de cobrança duplicada.
-- **Conformidade com Padrões Financeiros:** Padrão alinhado às diretrizes do Pix (Banco Central do Brasil) e gateways modernos (Stripe).
+- **Retentativas:** a chave única protege contra duplicação de transações confirmadas. Resposta original, divergência de dados e registros históricos seguem os contratos dos ADRs 0010 a 0012.
+- A presença de idempotência não comprova conformidade regulatória nem elimina todas as falhas de rede ou de operação.
 
 ### Trade-offs:
 - Todo consumidor da API precisa gerar e fornecer um identificador único (geralmente UUID v4) por intenção de pagamento.
