@@ -61,9 +61,6 @@ public class TransferController {
     ) {
         Currency currency = Currency.getInstance(request.currency().toUpperCase(Locale.ROOT));
         Money amount = Money.of(request.amount(), currency);
-        if (request.amount().compareTo(amount.amount()) != 0) {
-            throw new IllegalArgumentException("Amount has unsupported fractional digits for the currency");
-        }
 
         TransferMoneyCommand command = new TransferMoneyCommand(
                 request.sourceAccountId(),

@@ -102,7 +102,7 @@ Deterministic account lock ordering reduces deadlock risk. Unique keys prevent d
 
 | Model | Responsibility |
 | --- | --- |
-| `Money` | Immutable amount and currency; uses `BigDecimal` and currency-specific scale with `HALF_EVEN` rounding |
+| `Money` | Immutable amount and currency; uses `BigDecimal` and currency-specific scale with `UNNECESSARY`, rejecting values that require rounding; trailing zeros are normalized |
 | `Account` | Encapsulates balance changes, account status, insufficient-funds checks, and currency compatibility |
 | `Transaction` | Groups entries and validates that total debits equal total credits in a single currency |
 | `Entry` | Immutable positive debit or credit associated with an account |
@@ -339,6 +339,8 @@ This is an educational implementation with the following areas still open:
 - **Integration coverage:** transfer idempotency concurrency and rollback are tested on PostgreSQL. Full reconciliation from ledger-backed initial funding and load testing remain open; integration fixtures currently fund accounts directly.
 - **Funding:** no deposit API or ledger-balanced initial funding workflow is implemented.
 - **Ledger immutability:** foreign keys restrict deletion of referenced parents; they do not make ledger records append-only. Updates and entry deletion are not comprehensively prohibited by database permissions or triggers.
+- **PostgreSQL invariants:** the current migrations enforce nonnegative balances, positive entry amounts, valid entry types, foreign keys, and unique idempotency keys. They do not enforce at least two entries per transaction, equal debit/credit totals, matching currencies across accounts and entries, or agreement between account balances and ledger history. These guarantees depend on domain validation and the application transaction flow; direct SQL can bypass them. `NUMERIC(19,4)` also does not enforce each currency's fraction digits. Database enforcement and reconciliation remain future work.
+- **Future attempt auditing:** add a separate audit trail for transfer attempts, including rejected requests, failures, retries, and idempotency conflicts. Successful transfer receipts currently support response replay; they do not record every attempt. Define correlation identifiers, retention, sensitive-data handling, and persistence across transfer rollback before implementation.
 - **Statements:** no pagination, date filters, or explicit fetch optimization for entry loading; the lazy collection mapping can cause N+1 queries.
 - **Input bounds:** transfer key and description lengths are validated and the transfer API rejects currency rounding. Other string lengths and numeric limits are not fully validated against database column limits.
 - **Migration of existing data:** V2 adds a required column without a backfill, so upgrading a database containing transactions needs an additional migration strategy.

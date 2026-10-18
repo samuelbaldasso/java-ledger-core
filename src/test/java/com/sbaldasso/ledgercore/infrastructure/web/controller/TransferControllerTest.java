@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,6 +44,22 @@ class TransferControllerTest {
 
     @MockBean
     private TransferMoneyUseCase transferMoneyUseCase;
+
+    @Test
+    @DisplayName("Should reject currency rounding before executing a transfer")
+    void shouldRejectCurrencyRounding() throws Exception {
+        TransferRequest request = new TransferRequest(UUID.randomUUID(), UUID.randomUUID(),
+                new BigDecimal("10.005"), "BRL", "Payment");
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header("Idempotency-Key", "precision-test")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Amount has unsupported fractional digits for the currency"));
+
+        verifyNoInteractions(transferMoneyUseCase);
+    }
 
     @Test
     @DisplayName("Should return 200 OK when transfer succeeds")
