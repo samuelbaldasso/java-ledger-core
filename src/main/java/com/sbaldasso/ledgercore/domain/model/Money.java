@@ -13,7 +13,11 @@ public record Money(BigDecimal amount, Currency currency) implements Comparable<
 
         int fractionDigits = currency.getDefaultFractionDigits();
         int scale = Math.max(fractionDigits, 0);
-        amount = amount.setScale(scale, RoundingMode.HALF_EVEN);
+        try {
+            amount = amount.setScale(scale, RoundingMode.UNNECESSARY);
+        } catch (ArithmeticException ex) {
+            throw new IllegalArgumentException("Amount has unsupported fractional digits for the currency", ex);
+        }
     }
 
     public static Money of(BigDecimal amount, Currency currency) {

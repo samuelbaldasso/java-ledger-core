@@ -3,6 +3,8 @@ package com.sbaldasso.ledgercore.domain.model;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
 import java.util.Currency;
@@ -19,6 +21,32 @@ class MoneyTest {
     @Nested
     @DisplayName("Creation and Invariants")
     class CreationAndInvariants {
+
+        @ParameterizedTest
+        @CsvSource({"BRL, 1.001", "BRL, 1.005", "BRL, -1.005", "BRL, 0.001",
+                "JPY, 1.1", "BHD, 1.0001"})
+        @DisplayName("Should reject amounts requiring rounding through every creation path")
+        void shouldRejectAmountsRequiringRounding(String currencyCode, String value) {
+            Currency currency = Currency.getInstance(currencyCode);
+            BigDecimal amount = new BigDecimal(value);
+
+            assertThatThrownBy(() -> new Money(amount, currency)).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Amount has unsupported fractional digits for the currency");
+            assertThatThrownBy(() -> Money.of(amount, currency)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> Money.of(value, currency)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> Money.of(value, currencyCode)).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @ParameterizedTest
+        @CsvSource({"BRL, 1.2300, 1.23", "JPY, 100.0000, 100", "BHD, 1.2340, 1.234"})
+        @DisplayName("Should normalize exact values without losing currency precision")
+        void shouldNormalizeExactValues(String currencyCode, String value, String expected) {
+            Money money = Money.of(value, currencyCode);
+
+            assertThat(money.amount()).isEqualTo(new BigDecimal(expected));
+            assertThat(money.add(money).subtract(money)).isEqualTo(money);
+            assertThat(money.negate().negate()).isEqualTo(money);
+        }
 
         @Test
         @DisplayName("Should reject null amount")

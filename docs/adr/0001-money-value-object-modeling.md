@@ -4,6 +4,8 @@
 - **Data:** 2026-09-27
 - **Decisores:** Samuel Baldasso
 
+> Atualização em 2026-10-18: a política de `HALF_EVEN` descrita na decisão original abaixo foi substituída por `RoundingMode.UNNECESSARY`. O domínio rejeita valores que exigem arredondamento com `IllegalArgumentException`; zeros excedentes continuam sendo normalizados. Isso evita perda silenciosa de precisão também fora da API HTTP. Cálculos futuros que precisem de arredondamento devem definir uma política explícita antes de construir `Money`.
+
 ---
 
 ## 1. Contexto
